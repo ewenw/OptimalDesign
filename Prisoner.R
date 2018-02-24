@@ -7,65 +7,19 @@ library(GPfit)
 possible_moves <- c("c", "d")
 possible_outcomes <- c("cc", "cd", "dc", "dd")
 
-
-#~0.1 - 0.9
-r = seq(from=0, 1, length=100)
-k = seq(from=0, 1, length=100)
-grid = expand.grid("r"=r, "k"=k)
-
-CONST = 80
-#10 - 300
-grid$TE <- grid$r **2 * CONST + grid$k * CONST
-
-grid$S <- 1
-grid$P <- 5
-
-#10 - 300
-#grid$T <- pmax(grid$R + grid$r * 100 - grid$k * 40, grid$R)
-grid$R <- grid$r * (grid$r - grid$S + grid$TE - grid$P) + grid$S
-min(grid$R)
-#grid$P <- -grid$k * (grid$T - 1) + grid$R
-selection <- grid[sample(nrow(grid), 1),]
-selection
-#difference between T and R should always be > 0
-grid$DF = grid$TE - grid$R
-
-
-
-#GRID 2
-grid2 = expand.grid("r"=r, "k"=k)
-
-CONST = 80
-#10 - 300
-grid2$TE <- grid2$r **2 * CONST + grid2$k * CONST
-
-grid2$S <- 1
-grid2$P <- 8
-
-#10 - 300
-#grid$T <- pmax(grid$R + grid$r * 100 - grid$k * 40, grid$R)
-grid2$R <- grid2$r * (grid2$r - grid2$S + grid2$TE - grid2$P) + grid2$S
-grid2$RSOFT <- softmax(grid$R, 0.001)
-min(grid2$R)
-#grid$P <- -grid$k * (grid$T - 1) + grid$R
-selection <- grid2[sample(nrow(grid2), 1),]
-
-newGrid <- rbind(grid, grid2)
-
-ggplot(grid2, aes(r, k, color=RSOFT)) +
-  scale_colour_gradientn(colors=rainbow(4)) +
-  geom_point(shape=15, size=14) + theme_bw()
-
-payouts <- data.frame("Outcome"=possible_outcomes, 
-                      "P1_Payout"=c(6, 1, 15, 2), 
-                      "P2_Payout"=c(6, 15, 1, 2))
-
-
-
-get_payout <- function(game_data, r, k, P=5, S=1, CONST = 80){
+get_payout_table <- function(r=0.5, k=0.5, P=5, S=1, CONST = 80) {
+  #10 - 300
+  TE <- r * CONST + k * CONST
+  R <- r * (r - S + TE - P) + S
+  table <- data.frame("Outcome"=possible_outcomes, 
+             "P1_Payout"=c(R, S, TE, P), 
+             "P2_Payout"=c(R, TE, S, P))
+  return(table)
+}
+get_payout <- function(game_data, r=0.5, k=0.5, P=5, S=1, CONST = 80){
   
   #10 - 300
-  TE <- r **2 * CONST + k * CONST
+  TE <- r * CONST + k * CONST
   R <- r * (r - S + TE - P) + S
   
   if(game_data == "cc"){
@@ -81,21 +35,49 @@ get_payout <- function(game_data, r, k, P=5, S=1, CONST = 80){
     return (c(P, P))
   }
 }
-
-
-get_payout("cc", runif(n = 1, max = 1, min = 0), runif(n = 1, max = 1, min = 0))
-
-
-
-decide <- function(decision_model="Random", which_player=1, game_history=c(), round=1){
+get_coop_prob <- function (payouts, p=0.5, NOISE=2){
+  S <- payouts[payouts$Outcome=="cd",]$P1_Payout
+  R <- payouts[payouts$Outcome=="cc",]$P1_Payout
+  TE <- payouts[payouts$Outcome=="dc",]$P1_Payout
+  P <- payouts[payouts$Outcome=="dd",]$P1_Payout
+  expected_coop <- p*R + (1-p) * S + runif(1, -NOISE/2, NOISE/2)
+  expected_defect <- p* TE + (1-p) * P
+  return(expected_coop / (expected_coop + expected_defect))
+}
+decide <- function(payouts, p, decision_model="Random", which_player=1, game_history=c(), round=1){
   possible_moves <- c("c", "d")
   possible_outcomes <- c("cc", "cd", "dc", "dd")
   
-  if(decision_model=="Random"){
+
+  # model based on expected values of payouts and constant p
+  if(decision_model=="Expectation"){
+    prob_coop <- get_coop_prob(payouts, p)
+    return(sample(possible_moves, 1, prob=c(prob_coop, 1-prob_coop)))
+  }
+  # calculates p based on history
+  else if(decision_model=="AdaptiveExpectation"){
+    # if second round or later
+    if(round>2){
+      game_history <- game_history[length(game_history)]
+      nums <- data.frame(table(c(possible_outcomes, game_history))-1)
+      nums$p <- (nums$Freq+ exp(-16))
+      nums$p <- nums$p/sum(nums$p)
+      # calculate historical probability of opponent cooperating
+      if(which_player==1) {
+        p <- sum(nums$p[c(1,3)])
+      }
+      else {
+        p <- sum(nums$p[c(1,2)])
+      }
+    }
+    prob_coop <- get_coop_prob(payouts, p)
+    return(sample(possible_moves, 1, prob=c(prob_coop, 1-prob_coop)))
+  }
+  else if(decision_model=="Random"){
     return(sample(possible_moves, 1))
   }
-  if(decision_model=="TitForTat"){
-    if(game_history[1]=="00"){
+  else if(decision_model=="TitForTat"){
+    if(round==1){
       game_history<-sample(possible_moves, 2)
       oppo_move <- game_history[3-which_player]
       player_move <- oppo_move
@@ -106,14 +88,14 @@ decide <- function(decision_model="Random", which_player=1, game_history=c(), ro
     player_move <- oppo_move
     return(player_move)
   }
-  if(decision_model=="LastMove"){
+  else if(decision_model=="LastMove"){
     constant <- 3
-    if(game_history[1]=="00"){
+    if(round==1){
       game_history<-sample(possible_moves, 2)
       game_history <- paste0(game_history[1], game_history[2])
     }
     game_history <- game_history[length(game_history)]
-    nums <- data.frame(table(c(possible_outcomes,game_history))-1)
+    nums <- data.frame(table(c(possible_outcomes, game_history))-1)
     nums$Multiplic <- c(10.5, 1, 6.1, 2) ########## change
     nums$Value <- nums$Multiplic * nums$Freq + constant
     nums$p <- (nums$Value + exp(-16))
@@ -121,12 +103,13 @@ decide <- function(decision_model="Random", which_player=1, game_history=c(), ro
     player_move <- sample(c("c","d"), size=1, prob = c(sum(nums$p[1:2]), sum(nums$p[3:4])))
     return(player_move)
   }
-  if(decision_model=="HistoryAverage"){
-    if(game_history[1]=="00"){
-      game_history<-sample(possible_moves, 2)
+  else if(decision_model=="HistoryAverage"){
+    if(round==1){
+      game_history <- sample(possible_moves, 2)
       game_history <- paste0(game_history[1], game_history[2])
     }
-    nums <- data.frame(table(c(possible_outcomes,game_history))-1)
+    nums <- data.frame(table(c(possible_outcomes, game_history))-1)
+    
     nums$Multiplic <- c(10.5, 1, 6.1, 2) ########## change
     # should be gotten from get_payouts()
     nums$Value <- nums$Multiplic * nums$Freq
@@ -137,30 +120,13 @@ decide <- function(decision_model="Random", which_player=1, game_history=c(), ro
   }
 }
 
-p1_strat <- "HistoryAverage"
-p2_strat <- "LastMove"
-
-decision_model<- c(p1_strat, p2_strat)
 get_payout <- function(game_data, payouts){
   p <- payouts[ payouts$Outcome==game_data, ]
   p1p2vec <- c(p$P1_Payout, p$P2_Payout)
   return(p1p2vec)
 }
-#get_payout("cc", payouts)
-multiplier <- function (payouts, ri=0.5, ci=0.5){
-  S <- payouts[payouts$Outcome=="cd",]$P1_Payout
-  R <- payouts[payouts$Outcome=="cc",]$P1_Payout
-  TE <- payouts[payouts$Outcome=="dc",]$P1_Payout
-  P <- payouts[payouts$Outcome=="dd",]$P1_Payout
-  p <- ci
-  expected_coop <- p*R + (1-p) * S
-  expected_defect <- p* TE + (1-p) * P
-  return(expected_coop / (expected_coop + expected_defect))
-  #return(k * ci / (exp(-4) + (abs (ri - r))))
-}
 # Let's play!
-play_pd <- function(payouts, nRounds, decision_model=c("Random", "Random"), r=0.5, k=0.5, ri=0.5, ci=0.5){
-  
+play_pd <- function(payouts, nRounds, decision_model=c("Random", "Random"), r=0.5, k=0.5, p){
   game <- data.frame("Round"=c(1:nRounds), 
                      "p1_decision"=0, 
                      "p2_decision"=0, 
@@ -176,12 +142,8 @@ play_pd <- function(payouts, nRounds, decision_model=c("Random", "Random"), r=0.
   
   for(round in game$Round){
     g_hist <- game$fullgame[1:round-1]
-    if(round==1){
-      mult<-multiplier(payouts, ci=ci)
-      g_hist <- paste0(sample(possible_moves, 1, prob=c(mult, 1-mult)), sample(possible_moves, 1, prob=c(mult, 1-mult)))
-    }
-    game[round,]$p1_decision <- decide(decision_model[1], 1, g_hist, round)
-    game[round,]$p2_decision <- decide(decision_model[2], 2, g_hist, round)
+    game[round,]$p1_decision <- decide(payouts, p, decision_model[1], 1, g_hist, round)
+    game[round,]$p2_decision <- decide(payouts, p, decision_model[2], 2, g_hist, round)
     game$fullgame[round] <- paste0(game[round,]$p1_decision, game[round,]$p2_decision)
     game_payout <- get_payout(game$fullgame[round], payouts)
     game[round,]$p1_payout <- game_payout[1]
@@ -190,31 +152,113 @@ play_pd <- function(payouts, nRounds, decision_model=c("Random", "Random"), r=0.
   return(game)
 }
 
-num_sims <- 80
-data_all <- data.frame()
-for(i in c(1:num_sims)){
-  nRounds <- 10
-  data <- play_pd(payouts, nRounds, decision_model)
-  data$p1Tot <- cumsum(data$p1_payout)
-  data$p2Tot <- cumsum(data$p2_payout)
-  data2 <- data.frame("Round"=data$Round, "SimNum"=i,
-                      "Total_Payout"=c(data$p1Tot, data$p2Tot), 
-                      "Player"=c(rep("P1", nRounds), rep("P2", nRounds)), 
-                      "DecisionStrat"=c(rep(decision_model[1],nRounds),rep(decision_model[2],nRounds)))
-  data_all <- rbind(data_all, data2)
+simulate <- function(num_sims = 200, nRounds = 10, r = 0.5, k = 0.5, decision_model){
+  data_all <- data.frame()
+  for(p in seq(from=0.1, 0.9, length=4)){
+    for(i in c(1:num_sims)){
+      if(i %% 100==0){
+        print(i)
+      }
+      payouts <- get_payout_table(r, k)
+      data <- play_pd(payouts, nRounds, decision_model, r=r, k=k, p=p)
+      data$p1Tot <- cumsum(data$p1_payout)
+      data$p2Tot <- cumsum(data$p2_payout)
+      data2 <- data.frame("Round"=data$Round, "SimNum"=i, "p"=p,
+                          "Total_Payout"=c(data$p1Tot, data$p2Tot), 
+                          "Player"=c(rep("P1", nRounds), rep("P2", nRounds)),
+                          "FullGame"=data$fullgame,
+                          "DecisionStrat"=c(rep(decision_model[1],nRounds),rep(decision_model[2],nRounds)))
+      data_all <- rbind(data_all, data2)
+      
+    }
+  }
+  
+  return(data_all)
 }
-tail(data_all)
 
-df <- summarySE(data_all, measurevar="Total_Payout", groupvars = c("Player", "Round", "DecisionStrat"))
+bin_to_dec <- function(x) 
+  sum(2^(which(rev(unlist(strsplit(as.character(x), "")) == 1))-1))
 
-ggplot(df, aes(Round, Total_Payout, color=DecisionStrat)) +
-  geom_line(size=.5, alpha=0.7) + 
-  geom_ribbon(aes(ymin=Total_Payout-sd,ymax=Total_Payout+sd, fill=DecisionStrat),alpha=0.1, color=NA) +
-  geom_point(position = "dodge", width=0.2) + xlim(c(0,10)) + ylab("Cumulative Payout") + #ylim(c(0,100)) +
-  ggtitle("Prisoner's Dilemma") + 
-  theme_minimal()
+get_distribution <- function(data, num_sims=80, nRounds = 2){
+  Outcome <- c()
+  for(i in 1:num_sims){
+    rows <- data[data$SimNum == i,]
+    combination <- ""
+    for(j in 1:nRounds){
+      #print(rows[j, 6])
+      #print(a)
+      
+      if(rows[j,6] == "cc"){
+        bits <- "00"
+      }
+      if(rows[j,6] == "cd"){
+        bits <- "01"
+      }
+      if(rows[j,6] == "dc"){
+        bits <- "10"
+      }
+      if(rows[j,6] == "dd"){
+        bits <- "11"
+      }
+      combination <- paste0(combination, bits, sep="")
+      #combination <- paste0(combination, rows[j, 6], sep="")
+    }
+    Outcome <- c(Outcome, bin_to_dec(combination))
+    
+  }
+  distr <- data.frame(Outcome, "Model"=rep(data$DecisionStrat[1], length(Outcome)))
+  return(distr)
+}
+rounds = 5
+sims = 140
+r = 0.9
+k = 0.5
+results_titfortat <- simulate(r=r, k =k, num_sims = sims, nRounds = rounds, decision_model = c("TitForTat", "TitForTat"))
+results_adaptive <- simulate(r=r, k =k, num_sims = sims, nRounds = rounds, decision_model = c("AdaptiveExpectation", "AdaptiveExpectation"))
+results_expectation <- simulate(r=r, k =k, num_sims = sims, nRounds = rounds, decision_model = c("Expectation", "Expectation"))
 
-head(df)
+sims_titfortat <- get_distribution(data=results_titfortat, num_sims=sims, nRounds=rounds)
+sims_adaptive <- get_distribution(data=results_adaptive, num_sims=sims, nRounds=rounds)
+sims_expectation <- get_distribution(data=results_expectation, num_sims=sims, nRounds=rounds)
+
+sims_combined <- rbind(sims_titfortat, sims_adaptive, sims_expectation)
+sims_table <- data.frame(table(sims_combined))
+
+'%&%' <- function(x, y)paste0(x,y)
+
+ggplot(sims_combined, aes(x=Outcome, fill=Model)) +
+  geom_density(alpha=.5) +
+  scale_colour_gradient2() +
+  xlim(0, max(sims_combined$Outcome)) +
+  labs(title="Outcomes Distribution (r = " %&% r %&% ", k = " %&% k %&% ", " %&% rounds %&% " rounds, " %&% sims %&% " simulations)") +
+  labs(x="Outcomes", y="Occurences") + 
+  theme(panel.grid.major = element_blank(), 
+          panel.grid.minor = element_blank(),
+          panel.background = element_blank(), 
+          axis.line = element_line(colour = "black"))
+
+
+ggplot(sims_table) +
+  geom_bar(aes(reorder(Outcome, Freq), Freq, fill=Model),
+            alpha = .5, stat="identity") +
+  labs(title="Outcomes Distribution") +
+  labs(x="Outcomes", y="Occurences") + theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
+                                             panel.background = element_blank(), axis.line = element_line(colour = "black"))
+
+
+plotResults(simulate(r=0.5, k =0.5, num_sims = 5, nRounds = 10, decision_model = c("HistoryAverage", "AdaptiveExpectation")))
+plotResults <- function(data_all){
+  
+  df <- summarySE(data_all, measurevar="Total_Payout", groupvars = c("Player", "Round", "DecisionStrat"))
+  
+  ggplot(df, aes(Round, Total_Payout, color=DecisionStrat)) +
+    geom_line(size=.5, alpha=0.7) + 
+    geom_ribbon(aes(ymin=Total_Payout-sd,ymax=Total_Payout+sd, fill=DecisionStrat),alpha=0.1, color=NA) +
+    geom_point(position = "dodge", width=0.2) + xlim(c(0,10)) + ylab("Cumulative Payout") + #ylim(c(0,100)) +
+    ggtitle("Prisoner's Dilemma") + 
+    theme_minimal()
+}
+
 
 
 
