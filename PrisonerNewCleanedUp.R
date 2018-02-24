@@ -182,10 +182,8 @@ bin_to_dec <- function(x)
 get_distribution <- function(data, num_sims=80, nRounds = 2){
   Outcome <- c()
   for(i in 1:num_sims){
-    print("here")
     rows <- data[data$SimNum == i,]
     combination <- ""
-    print("here2")
     for(j in 1:nRounds){
       #print(rows[j, 6])
       #print(a)
@@ -205,23 +203,44 @@ get_distribution <- function(data, num_sims=80, nRounds = 2){
       combination <- paste0(combination, bits, sep="")
       #combination <- paste0(combination, rows[j, 6], sep="")
     }
-    Outcome <- c(Outcome, get_distribution(combination))
+    Outcome <- c(Outcome, bin_to_dec(combination))
     
   }
   distr <- data.frame(Outcome, "Model"=rep(data$DecisionStrat[1], length(Outcome)))
   return(distr)
 }
-rounds = 4
-sims = 100
-results_adaptive <- simulate(r=0.9, k =0.5, num_sims = sims, nRounds = rounds, decision_model = c("AdaptiveExpectation", "AdaptiveExpectation"))
-results_expectation <- simulate(r=0.9, k =0.5, num_sims = sims, nRounds = rounds, decision_model = c("Expectation", "Expectation"))
-sims_adaptive <- get_distribution(results_adaptive, num_sims=sims, nRounds=rounds)
-sims_expectation <- get_distribution(results_expectation, num_sims=sims, nRounds=rounds)
-sims_combined <- rbind(sims_adaptive, sims_expectation)
+rounds = 5
+sims = 140
+r = 0.9
+k = 0.5
+results_titfortat <- simulate(r=r, k =k, num_sims = sims, nRounds = rounds, decision_model = c("TitForTat", "TitForTat"))
+results_adaptive <- simulate(r=r, k =k, num_sims = sims, nRounds = rounds, decision_model = c("AdaptiveExpectation", "AdaptiveExpectation"))
+results_expectation <- simulate(r=r, k =k, num_sims = sims, nRounds = rounds, decision_model = c("Expectation", "Expectation"))
+
+sims_titfortat <- get_distribution(data=results_titfortat, num_sims=sims, nRounds=rounds)
+sims_adaptive <- get_distribution(data=results_adaptive, num_sims=sims, nRounds=rounds)
+sims_expectation <- get_distribution(data=results_expectation, num_sims=sims, nRounds=rounds)
+
+sims_combined <- rbind(sims_titfortat, sims_adaptive, sims_expectation)
 sims_table <- data.frame(table(sims_combined))
+
+'%&%' <- function(x, y)paste0(x,y)
+
+ggplot(sims_combined, aes(x=Outcome, fill=Model)) +
+  geom_density(alpha=.5) +
+  scale_colour_gradient2() +
+  xlim(0, max(sims_combined$Outcome)) +
+  labs(title="Outcomes Distribution (r = " %&% r %&% ", k = " %&% k %&% ", " %&% rounds %&% " rounds, " %&% sims %&% " simulations)") +
+  labs(x="Outcomes", y="Occurences") + 
+  theme(panel.grid.major = element_blank(), 
+          panel.grid.minor = element_blank(),
+          panel.background = element_blank(), 
+          axis.line = element_line(colour = "black"))
+
+
 ggplot(sims_table) +
   geom_bar(aes(reorder(Outcome, Freq), Freq, fill=Model),
-            alpha = .7, stat="identity") +
+            alpha = .5, stat="identity") +
   labs(title="Outcomes Distribution") +
   labs(x="Outcomes", y="Occurences") + theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
                                              panel.background = element_blank(), axis.line = element_line(colour = "black"))
