@@ -1,3 +1,4 @@
+
 library(ggplot2)
 library(GPfit)
 
@@ -8,26 +9,32 @@ source("GaussianProcess.r")
 possible_moves <- c("c", "d")
 possible_outcomes <- c("cc", "cd", "dc", "dd")
 
-get_payout_table <- function(r=0.5, k=0.5, P=6, S=3, CONST = 50) {
-  TE <- r * CONST + k * CONST
-  R <- r * k * (r - S + TE - P) + S
+# T > R > P > S
+get_payout_table <- function(r=0.5, k=0.5, P=3, S=1, CONST = 25) {
+  r<- r +0.6
+  P<-log(P/((r*k))) 
+  S<-log(S/((r*k))) 
+  R <- ((k + 1) * P * r - k * S) / ((k * (r - 1) + r))
+  T <- (R - P) / k + S 
   table <- data.frame("Outcome"=possible_outcomes, 
-                      "P1_Payout"=c(R, S, TE, P), 
-                      "P2_Payout"=c(R, TE, S, P))
+                      "P1_Payout"=c(R, S, T, P), 
+                      "P2_Payout"=c(R, T, S, P))
   return(table)
 }
-get_payout <- function(game_data, r=0.5, k=0.5, P=6, S=3, CONST = 50){
-  TE <- r * CONST + k * CONST
-  R <- r * k * (r - S + TE - P) + S
-  
+get_payout <- function(game_data, r=0.5, k=0.5, P=3, S=1, CONST = 25){
+  r<- r +0.6
+  P<-log(P/((r*k))) 
+  S<-log(S/((r*k))) 
+  R <- ((k + 1) * P * r - k * S) / ((k * (r - 1) + r))
+  T <- (R - P) / k + S 
   if(game_data == "cc"){
     return (c(R, R))
   }
   if(game_data == "cd"){
-    return (c(S, TE))
+    return (c(S, T))
   }
   if(game_data == "dc"){
-    return (c(TE, S))
+    return (c(T, S))
   }
   if(game_data == "dd"){
     return (c(P, P))
@@ -262,7 +269,7 @@ get_distribution <- function(data, num_sims=80, nRounds = 2){
 }
 
 # simulates experiment models and returns the KL Divergence
-search <- function(r, k, rounds = 6, sims = 500, col){
+search <- function(r, k, rounds = 6, sims = 500){
   #results_titfortat <- simulate(r=r, k =k, num_sims = sims, nRounds = rounds, decision_model = c("TitForTat", "TitForTat"))
   results_adaptive <- simulate(r=r, k =k, num_sims = sims, nRounds = rounds, decision_model = c("AdaptiveExpectation", "AdaptiveExpectation"))
   results_expectation_risk <- simulate(r=r, k =k, num_sims = sims, nRounds = rounds, decision_model = c("ExpectationRisk", "ExpectationRisk"))
@@ -303,41 +310,58 @@ search <- function(r, k, rounds = 6, sims = 500, col){
   
   tab_all$Cost<-c(1:dim(tab_all)[1])
   
-  for(i in tab_all$Cost){
-    outcome_i <- tab_all[tab_all$Cost==i,]$Var1
-    i<-game_data[game_data$Outcome==outcome_i,]$Cost
-    #tab_all$Cost[tab_all$Cost==i] <- sum(game_data[game_data$Outcome==outcome_i,]$Cost)
-    #tab_all$Cost[i] <- game_data[game_data$Outcome==outcome_i,]$Cost
+  for(i in 1:nrow(tab_all)){
+    tab_all$Cost[i] <- game_data[game_data$Outcome==tab_all$Var1[i],]$Cost
   }
   
-  tab_all$ModFreq <- tab_all$Freq / tab_all$Cost
-  tab_all[tab_all$Model=="Adapt",]$ModFreq <- tab_all[tab_all$Model=="Adapt",]$ModFreq / sum(tab_all[tab_all$Model=="Adapt",]$ModFreq)
-  tab_all[tab_all$Model=="Expec",]$ModFreq <- tab_all[tab_all$Model=="Expec",]$ModFreq / sum(tab_all[tab_all$Model=="Expec",]$ModFreq)
-  tab_all[tab_all$Model=="Exris",]$ModFreq <- tab_all[tab_all$Model=="Exris",]$ModFreq / sum(tab_all[tab_all$Model=="Exris",]$ModFreq)
-  tab_all[tab_all$Model=="Greed",]$ModFreq <- tab_all[tab_all$Model=="Greed",]$ModFreq / sum(tab_all[tab_all$Model=="Greed",]$ModFreq)
-  model_names <- unique(tab_all$Model)
-  leading_model <- model_names[1]
-  sum(tab_all$ModFreq)
+  #for(i in tab_all$Cost){
+   # outcome_i <- tab_all[tab_all$Cost==i,]$Var1
+   # tab_all[tab_all$Cost==i,]$Cost <- game_data[game_data$Outcome==outcome_i,]$Cost
+    #tab_all$Cost[tab_all$Cost==i] <- sum(game_data[game_data$Outcome==outcome_i,]$Cost)
+  #}
   
-  return (kl_divergence(tab_all, model_names, col=col, asymmetric=F))
+  tab_all$ModFreq <- tab_all$Freq / tab_all$Cost
+  #tab_all[tab_all$Model=="Adapt",]$ModFreq <- tab_all[tab_all$Model=="Adapt",]$ModFreq / sum(tab_all[tab_all$Model=="Adapt",]$ModFreq)
+  #tab_all[tab_all$Model=="Expec",]$ModFreq <- tab_all[tab_all$Model=="Expec",]$ModFreq / sum(tab_all[tab_all$Model=="Expec",]$ModFreq)
+  #tab_all[tab_all$Model=="Exris",]$ModFreq <- tab_all[tab_all$Model=="Exris",]$ModFreq / sum(tab_all[tab_all$Model=="Exris",]$ModFreq)
+  #tab_all[tab_all$Model=="Greed",]$ModFreq <- tab_all[tab_all$Model=="Greed",]$ModFreq / sum(tab_all[tab_all$Model=="Greed",]$ModFreq)
+  model_names <- unique(tab_all$Model)
+  
+  return (c(kl_divergence(tab_all, model_names, col="Freq", asymmetric=F), 
+            kl_divergence(tab_all, model_names, col="ModFreq", asymmetric=F)))
 }
 
 
-
-# to do: wrap the above in a function, span through r and k, storing the I values for each of them
-### plot on heatmap
-
-points = 20
-found_points <- data.frame("r"=runif(points), "k"=runif(points))
-for(i in 1:nrow(found_points)){
-  found_points$I[i] <- search(found_points$r[i], found_points$k[i], sims=100, col="ModFreq")
+nPoints = 4
+r_s = seq(from=0.1, to=0.9, length.out = nPoints)
+k_s = seq(from=0.1, to=0.9, length.out = nPoints)
+found_points_I <- expand.grid(r=r_s, k=k_s)
+found_points_IE <- data.frame(found_points_I)
+for(i in 1:nrow(found_points_I)){
+  print(i)
+  search_results = search(found_points_I$r[i], found_points_I$k[i], sims=500)
+  found_points_I$I[i] <- search_results[1]
+  found_points_IE$I[i] <- search_results[2]
 }
-plotSurface(found_points, n=160, title="Information Efficiency ($ cost weighted) Surface (20 arbitrary points, 100 sims)")
+#found_points_IE$I <- sum(found_points_IE$I)
+plotSurface(found_points_I, n=100, title="Information Surface (16 uniform samples, 500 sims)")
+plotSurface(found_points_IE, n=100, title="Information Efficiency ($ cost weighted) Surface (16 uniform samples, 500 sims)")
 
+r=0.6
+k=0.5
+sims=100
+rounds = 6
+results_adaptive <- simulate(r=r, k =k, num_sims = sims, nRounds = rounds, decision_model = c("AdaptiveExpectation", "AdaptiveExpectation"))
+results_expectation_risk <- simulate(r=r, k =k, num_sims = sims, nRounds = rounds, decision_model = c("ExpectationRisk", "ExpectationRisk"))
+results_expectation <- simulate(r=r, k =k, num_sims = sims, nRounds = rounds, decision_model = c("Expectation", "Expectation"))
+results_greedy <- simulate(r=r, k =k, num_sims = sims, nRounds = rounds, decision_model = c("ExpectationGreedy", "ExpectationGreedy"))
 
-
-'%&%' <- function(x, y)paste0(x,y)
-
+#sims_titfortat <- get_distribution(data=results_titfortat, num_sims=sims, nRounds=rounds)
+sims_adaptive <- get_distribution(data=results_adaptive, num_sims=sims, nRounds=rounds)
+sims_expectation_risk <- get_distribution(data=results_expectation_risk, num_sims=sims, nRounds=rounds)
+sims_expectation <- get_distribution(data=results_expectation, num_sims=sims, nRounds=rounds)
+sims_greedy <- get_distribution(data=results_greedy, num_sims=sims, nRounds=rounds)
+sims_combined <- rbind(sims_adaptive, sims_greedy, sims_expectation, sims_expectation_risk)
 ggplot(sims_combined, aes(x=Outcome, fill=Model)) +
   geom_density(alpha=.35) +
   scale_colour_gradient2() +
@@ -350,12 +374,6 @@ ggplot(sims_combined, aes(x=Outcome, fill=Model)) +
         axis.line = element_line(colour = "black"))
 
 
-ggplot(sims_table) +
-  geom_bar(aes(reorder(Outcome, Freq), Freq, fill=Model),
-           alpha = .5, stat="identity") +
-  labs(title="Outcomes Distribution") +
-  labs(x="Outcomes", y="Occurences") + theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
-                                             panel.background = element_blank(), axis.line = element_line(colour = "black"))
 
 
 num_sims = 400

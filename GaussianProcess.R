@@ -12,6 +12,7 @@ library(GPfit)
 #############################################################
 # Gaussian Process
 
+'%&%' <- function(x, y)paste0(x,y)
 
 plotSurface <- function(data, n=10, title){
   r_values <- seq(0,1,length.out=n)
